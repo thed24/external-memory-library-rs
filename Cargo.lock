@@ -87,8 +87,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "external_memory_lib"
-version = "0.1.0"
+name = "external-memory-lib"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",

@@ -1,5 +1,5 @@
 #![feature(strict_provenance)]
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Context};
 use bincode::{
     config::{Configuration, Fixint, LittleEndian, NoLimit, WriteFixedArrayLength},
     Encode,
@@ -9,7 +9,7 @@ use cxx::let_cxx_string;
 #[cxx::bridge(namespace = "Driver")]
 mod ffi {
     unsafe extern "C++" {
-        include!("external_memory_lib/Include/include/Driver.h");
+        include!("external-memory-lib/Include/include/Driver.h");
 
         fn read_memory(process_id: usize, address: usize, buffer: usize, size: usize) -> bool;
         fn write(process_id: usize, address: usize, buffer: &usize);
@@ -25,9 +25,7 @@ impl MemoryConfigurer {
     pub fn default() -> Self {
         Self {}
     }
-}
 
-impl MemoryConfigurer {
     pub fn configure(self, process_name: &str, module: &str, offset: usize) -> MemoryBuilder {
         let_cxx_string!(c_process_name = process_name);
         let_cxx_string!(c_module = module);
@@ -54,7 +52,7 @@ impl MemoryBuilder {
                 process_id: self.process_id,
                 base_address: self.base_address,
             }),
-            false => bail!("Failed to initialize memory"),
+            false => bail!("Failed to initialize driver"),
         }
     }
 }
@@ -68,31 +66,25 @@ impl Memory {
     pub fn read_bytes(&self, address: usize, size: usize) -> Result<Vec<u8>> {
         let buffer = vec![0; size];
 
-        let read = ffi::read_memory(self.process_id, address, buffer.as_ptr().addr(), size);
+        let read_successfully = ffi::read_memory(self.process_id, address, buffer.as_ptr().addr(), size);
 
-        if read {
-            Ok(buffer)
-        } else {
-            bail!(
-                "Failed to read bytes with size {} from address {:#01x}",
-                size,
-                address
-            )
+        match read_successfully {
+            true => Ok(buffer),
+            false => bail!("Failed to read bytes with size {} from address {:#01x}", size, address),
         }
     }
 
     pub fn read_bytes_into_buffer(&self, address: usize, buffer: &mut [u8]) -> Result<()> {
-        let read = ffi::read_memory(
+        let read_successfully = ffi::read_memory(
             self.process_id,
             address,
             buffer.as_mut_ptr() as usize,
             buffer.len(),
         );
 
-        if read {
-            Ok(())
-        } else {
-            bail!("Failed to read memory into buffer.")
+        match read_successfully {
+            true => Ok(()),
+            false => bail!("Failed to read into buffer {:#01x}", buffer.as_mut_ptr().addr()),
         }
     }
 
@@ -109,21 +101,16 @@ impl Memory {
     pub fn read_string(&self, address: usize, buffer_size: usize) -> Result<String> {
         let buffer = vec![0; buffer_size];
 
-        let read = ffi::read_memory(
+        let read_successfully = ffi::read_memory(
             self.process_id,
             address,
             buffer.as_ptr().addr(),
             buffer.len(),
         );
 
-        if read {
-            let string = std::str::from_utf8(&buffer);
-            match string {
-                Ok(string) => Ok(string.to_string()),
-                Err(err) => bail!("Failed to parse string: {}", err),
-            }
-        } else {
-            bail!("Failed to read string.")
+        match read_successfully {
+            true => String::from_utf8(buffer).context("Failed to parse string from UTF8"),
+            false => bail!("Failed to read string from address {:#01x}", address),
         }
     }
 
@@ -161,7 +148,7 @@ impl Memory {
         Ok(current_address)
     }
 
-    pub fn write_by_type<T: Encode>(&self, address: usize, value: T) -> Result<()> {
+    pub fn write<T: Encode>(&self, address: usize, value: T) -> Result<()> {
         let size = std::mem::size_of::<T>();
         let mut vec = vec![0_u8; size];
         let buffer = vec.as_mut_slice();
@@ -171,11 +158,11 @@ impl Memory {
             Configuration<LittleEndian, Fixint, WriteFixedArrayLength, NoLimit>,
         >(value, buffer, bincode::config::legacy())?;
 
-        self.write(address, buffer.as_ptr().addr());
+        self.write_ptr(address, buffer.as_ptr().addr());
         Ok(())
     }
 
-    pub fn write(&self, address: usize, value: usize) {
+    pub fn write_ptr(&self, address: usize, value: usize) {
         ffi::write(self.process_id, address, &value);
     }
 }

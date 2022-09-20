@@ -4,9 +4,8 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-cxx = "1.0.68"
+cxx = "1.0.71"
 anyhow = "1.0.57"
-bincode = { version = "2.0.0-rc" }
 
 [build-dependencies]
-cxx-build = "1.0"
+cxx-build = "1.0.71"
